@@ -10,8 +10,22 @@ rem
 rem  사용법:
 rem    export-diff.bat                              브랜치 목록에서 대화형 선택
 rem    export-diff.bat main                         base 브랜치 직접 지정
-rem    export-diff.bat origin/main export\pr.zip    출력 경로까지 지정
+rem    export-diff.bat origin/main out.zip          출력 경로까지 지정
 rem    export-diff.bat main /y                      덮어쓰기 확인 없이 진행
+rem    export-diff.bat /h                           도움말
+rem
+rem  기본 출력 경로:
+rem    %USERPROFILE%\Downloads\<저장소이름>-changed-files.zip
+rem
+rem  이식성:
+rem    저장소 위치를 실행 시점의 현재 폴더에서 git 으로 찾으므로, 어떤 프로젝트에
+rem    복사해도 수정 없이 동작합니다. 저장소의 하위 폴더에서 실행해도 됩니다.
+rem
+rem  지원하지 않는 경우 - 조용히 빠지지 않고 WARN 과 함께 누락으로 집계됩니다:
+rem    - 경로에 ! 또는 % 가 들어간 파일. cmd 변수 확장 한계입니다.
+rem    - 서브모듈 경로. 파일이 아니라 gitlink 이므로 건너뜁니다.
+rem    - 260자를 넘는 경로.
+rem    - 작업 트리에 없는 git LFS 파일. 폴백이 실제 내용 대신 포인터 파일을 넣습니다.
 rem
 rem  주의: 이 스크립트는 한글 경로 대응을 위해 코드페이지를 65001 로 바꿉니다.
 rem        cmd 의 알려진 제약으로 65001 에서는 파이프/리다이렉트로 넘긴 입력을
@@ -52,6 +66,10 @@ set "OUT="
 set "FORCE="
 :parse_args
 if "%~1"=="" goto :args_done
+if "%~1"=="/?" goto :usage
+if /i "%~1"=="/h" goto :usage
+if /i "%~1"=="-h" goto :usage
+if /i "%~1"=="--help" goto :usage
 if /i "%~1"=="/y" set "FORCE=1" & shift & goto :parse_args
 if /i "%~1"=="-y" set "FORCE=1" & shift & goto :parse_args
 if not defined BASE set "BASE=%~1" & shift & goto :parse_args
@@ -65,7 +83,16 @@ rem --- 저장소 루트로 이동 - diff 경로가 루트 기준이므로 ---
 set "REPO="
 for /f "delims=" %%R in ('git rev-parse --show-toplevel') do set "REPO=%%R"
 set "REPO=%REPO:/=\%"
-if "%OUT%"=="" set "OUT=%REPO%\export\changed-files.zip"
+
+rem --- 기본 출력은 저장소 밖 Downloads 로. 작업 트리를 오염시키지 않으려고 ---
+for %%I in ("%REPO%") do set "REPONAME=%%~nxI"
+if not defined REPONAME set "REPONAME=repo"
+if not defined OUT (
+    set "OUTDIR=%USERPROFILE%\Downloads"
+    if not exist "!OUTDIR!\" set "OUTDIR=%USERPROFILE%"
+    set "OUT=!OUTDIR!\!REPONAME!-changed-files.zip"
+)
+
 pushd "%REPO%" || (
     echo [ERROR] 저장소 루트로 이동할 수 없습니다: %REPO%
     set "EXITCODE=1"
@@ -223,6 +250,39 @@ echo.
 goto :cleanup
 
 rem ===========================================================================
+rem  도움말
+rem ===========================================================================
+:usage
+echo.
+echo  현재 브랜치를 base 브랜치로 PR 할 때 포함되는 변경 파일만 골라
+echo  폴더 구조를 유지한 채 ZIP 으로 묶습니다.
+echo  비교 범위는 GitHub PR 의 Files changed 와 동일한 merge-base 기준입니다.
+echo.
+echo  사용법:
+echo    export-diff.bat                       브랜치 목록에서 대화형 선택
+echo    export-diff.bat ^<base^>                base 브랜치 직접 지정
+echo    export-diff.bat ^<base^> ^<out.zip^>     출력 경로까지 지정
+echo.
+echo  옵션:
+echo    /y            기존 ZIP 을 덮어쓸 때 확인하지 않음
+echo    /h            이 도움말
+echo.
+echo  기본 출력:
+echo    %%USERPROFILE%%\Downloads\^<저장소이름^>-changed-files.zip
+echo.
+echo  예:
+echo    export-diff.bat main
+echo    export-diff.bat origin/main D:\share\pr.zip /y
+echo.
+echo  ZIP 안에는 변경 파일과 함께 _changed-files.txt 가 들어갑니다.
+echo  삭제된 파일은 ZIP 에 담기지 않고 이 목록에 D 로만 기록됩니다.
+echo.
+echo  비대화형 실행 시에는 base 브랜치를 반드시 인수로 넘기세요.
+echo  자세한 제약은 스크립트 상단 주석을 참고하세요.
+echo.
+goto :cleanup
+
+rem ===========================================================================
 rem  서브루틴
 rem ===========================================================================
 
@@ -255,7 +315,8 @@ set /a COPIED+=1
 goto :eof
 :copy_fail
 if not exist "%REL%" if exist "%STAGE%\%REL%" del /q "%STAGE%\%REL%" >nul 2>&1
-echo    [WARN] 추출 실패: %GP%
+echo    [WARN] 추출 실패 - 건너뜁니다: %GP%
+echo           경로에 ^! 나 %% 가 있는지, 서브모듈인지, 260자를 넘는지 확인하세요.
 set /a MISSING+=1
 goto :eof
 
