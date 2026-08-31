@@ -13,6 +13,9 @@ dist-ssr
 *.local
 *.tsbuildinfo
 
+# scripts/export-diff.bat 출력물
+export
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
