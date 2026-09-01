@@ -1,32 +1,40 @@
 @echo off
 setlocal enabledelayedexpansion
+rem ==== ASCII-only relaunch block ===========================================
+rem cmd tracks batch-file offsets while decoding with the console codepage.
+rem Changing the codepage MID-RUN desyncs that bookkeeping wherever the file
+rem contains multi-byte (Korean UTF-8) text: fragments of lines get executed
+rem and other lines are silently lost (README 5.7 defect B - reproduced).
+rem Therefore: if the console is not already 65001, switch and re-run self,
+rem so the actual work below is parsed under 65001 from the very start.
+rem Keep this block and everything above it strictly ASCII.
+set "ORIGCP="
+for /f "tokens=2 delims=:" %%C in ('chcp') do set "ORIGCP=%%C"
+set "ORIGCP=%ORIGCP: =%"
+set "ORIGCP=%ORIGCP:.=%"
+if "%ORIGCP%"=="65001" goto :main
+if defined EXPORTDIFF_RELAUNCHED goto :main
+set "EXPORTDIFF_RELAUNCHED=1"
+chcp 65001 >nul
+cmd /d /c ""%~f0" %*"
+exit /b %ERRORLEVEL%
 rem ===========================================================================
 rem  export-diff.bat
 rem
 rem  현재 브랜치를 base 브랜치로 PR 할 때 포함되는 변경 파일만 골라서
 rem  원본 폴더 구조를 유지한 채 ZIP 으로 묶습니다.
 rem  비교 범위는 GitHub PR 의 "Files changed" 와 동일한 merge-base 기준입니다.
-rem
-rem  사용법:
-rem    export-diff.bat                              브랜치 목록에서 대화형 선택
-rem    export-diff.bat main                         base 브랜치 직접 지정
-rem    export-diff.bat origin/main out.zip          출력 경로까지 지정
-rem    export-diff.bat main /y                      덮어쓰기 확인 없이 진행
-rem    export-diff.bat main /local                  upstream 자동 전환 끄기
-rem    export-diff.bat main /v                      진단 정보 출력
-rem    export-diff.bat /h                           도움말
+rem  사용법은 export-diff.bat /h 를 참고하세요.
 rem
 rem  base 해석:
 rem    로컬 브랜치명을 주면 그 브랜치의 upstream 으로 자동 전환합니다. GitHub 은 항상
 rem    현재 base 브랜치 tip 으로 merge-base 를 다시 계산하는데, 로컬 브랜치는 pull 전까지
 rem    과거에 머물러 있어 그대로 쓰면 이미 base 에 머지된 커밋까지 딸려 나옵니다.
 rem
-rem  기본 출력 경로:
-rem    %USERPROFILE%\Downloads\<저장소이름>-changed-files.zip
+rem  기본 출력 경로: %USERPROFILE%\Downloads\<저장소이름>-changed-files.zip
 rem
-rem  이식성:
-rem    저장소 위치를 실행 시점의 현재 폴더에서 git 으로 찾으므로, 어떤 프로젝트에
-rem    복사해도 수정 없이 동작합니다. 저장소의 하위 폴더에서 실행해도 됩니다.
+rem  이식성: 저장소 위치를 실행 시점의 현재 폴더에서 git 으로 찾으므로, 어떤
+rem  프로젝트에 복사해도 수정 없이 동작합니다. 하위 폴더에서 실행해도 됩니다.
 rem
 rem  지원하지 않는 경우 - 조용히 빠지지 않고 WARN 과 함께 누락으로 집계되며,
 rem  누락이 하나라도 있으면 종료 코드 1 로 끝납니다:
@@ -37,19 +45,11 @@ rem    - 작업 트리에 없는 git LFS 파일. 폴백이 실제 내용 대신 
 rem
 rem  hidden 속성 파일은 cmd 의 copy 가 읽지 못해 HEAD 커밋 내용으로 대체 추출됩니다.
 rem  커밋하지 않은 작업 트리 변경은 그대로 ZIP 에 담기므로 시작 시 경고를 띄웁니다.
-rem
-rem  주의: 이 스크립트는 한글 경로 대응을 위해 코드페이지를 65001 로 바꿉니다.
-rem        cmd 의 알려진 제약으로 chcp 호출 뒤에는 파일 리다이렉트로 넘긴 입력을
-rem        set /p 이 읽지 못합니다. 파이프 입력은 동작합니다. 비대화형 실행 시에는
-rem        base 브랜치를 인수로 넘기고, 필요하면 /y 를 함께 지정하세요.
+rem  주의: 코드페이지는 실행 후 65001 로 남습니다 - 원복하면 콘솔 화면이 지워져
+rem        출력이 사라집니다. chcp 뒤에는 파일 리다이렉트 입력을 set /p 이 못
+rem        읽습니다. 파이프는 동작합니다. 비대화형은 base 인수 + /y 를 쓰세요.
 rem ===========================================================================
-
-rem --- 코드페이지를 UTF-8 로 전환 - 한글 경로 대응, 종료 시 원복 ---
-set "ORIGCP="
-for /f "tokens=2 delims=:" %%C in ('chcp') do set "ORIGCP=%%C"
-set "ORIGCP=%ORIGCP: =%"
-set "ORIGCP=%ORIGCP:.=%"
-chcp 65001 >nul
+:main
 
 set "EXITCODE=0"
 set "STAGE="
@@ -500,5 +500,5 @@ if defined STAGE if exist "%STAGE%\" rd /s /q "%STAGE%" >nul 2>&1
 if defined LIST if exist "%LIST%" del /q "%LIST%" >nul 2>&1
 if defined CNTFILE if exist "%CNTFILE%" del /q "%CNTFILE%" >nul 2>&1
 if defined PUSHED popd
-if defined ORIGCP chcp %ORIGCP% >nul
+rem 코드페이지는 의도적으로 원복하지 않는다 - 949 및 65001 간 전환이 화면을 지운다 (README 5.7)
 endlocal & exit /b %EXITCODE%
